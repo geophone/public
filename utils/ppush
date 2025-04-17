@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import subprocess
+import time
+import tqdm
+
+REMOTE = sys.argv[1] if len(sys.argv) > 1 else "origin"
+BRANCH = sys.argv[2] if len(sys.argv) > 2 else "main"
+CHUNK_SIZE = 500 # no push pack size > 500MB
+LFS_THRESHOLD = 10  # skip files > 10MB
+
+def run_cmd(cmd):
+    return run_cmd_nq(cmd)
+    print(f'going to run:{cmd}')
+    """Run a shell command and return the output"""
+    return subprocess.check_output(cmd, shell=True).decode('utf-8').strip()
+
+def run_cmd_nq(cmd):
+    return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode('utf-8').strip()
+
+def run_cmd_quiet(cmd):
+    """Run a command without capturing output"""
+    subprocess.call(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+current_head = run_cmd("git rev-parse HEAD")
+
+current_base = run_cmd('git rev-parse origin/main')
+
+try:
+    commits = run_cmd(f"git rev-list --reverse {current_base}..{current_head}").split("\n")
+    if not commits or commits == [""]:
+        print("No commits to push")
+        sys.exit(0)
+except subprocess.CalledProcessError:
+    print("No commits to push")
+    sys.exit(0)
+
+# Initialize variables
+batch_size = 0
+batch_count = 1
+batch_files = []
+last_pushed = ""
+
+def process_batch(batch_files, batch_size, batch_count, last_pushed):
+    if not batch_files:
+        print(f"No files to push in batch {batch_count}")
+        return last_pushed
+    
+    temp_branch = f"temp-push-{int(time.time())}"
+    
+    if not last_pushed:
+        run_cmd(f"git checkout -b {temp_branch} {current_base}") # we should not always drop to main but this shit is so broke
+    else:
+        run_cmd(f"git checkout -b {temp_branch} {last_pushed}")
+
+    try:
+        files_to_checkout = " ".join([f'"{file}"' for file in batch_files])
+        run_cmd(f"git checkout main -- {files_to_checkout}")
+        run_cmd(f"git add {files_to_checkout}")
+        run_cmd(f"git commit -m \"{temp_branch}\"")
+    except subprocess.CalledProcessError:
+        print("Error checking out batch files")
+        sys.exit(1)
+
+    try:
+        run_cmd(f"git push -u {REMOTE} {temp_branch}:{BRANCH}")
+        return run_cmd('git rev-parse origin/main') # seek forward till done
+
+    except subprocess.CalledProcessError:
+        sys.exit(1)
+
+# Get all changed files
+try:
+    all_files = run_cmd(f"git diff --name-only {current_base} {current_head}").split("\n")
+    all_files = [f for f in all_files if f]  # Remove empty entries
+    total_files = len(all_files)
+except subprocess.CalledProcessError:
+    all_files = []
+    total_files = 0
+
+
+#remove large files(from inclusion list) and add them to .gitignore
+small_files = []
+total_size = 0
+for file in tqdm.tqdm(all_files, desc='Adding large files to gitignore'):
+    if os.path.isfile('./' + file):
+        try:
+            file_size = int(run_cmd_nq(f"du -b \"{file}\" | cut -f1"))
+            if file_size > (LFS_THRESHOLD * 1024 * 1024):
+                with open(".gitignore", "a") as f:
+                    f.write(f"{file}\n")
+            else:
+                total_size += file_size
+                small_files.append((file, int(file_size / (1024 * 1024)))   )
+        except (subprocess.CalledProcessError, ValueError):
+            pass  
+
+print("All large files added to git ignore")
+all_files = small_files
+
+batch_files = []
+batch_size = 0
+
+def get_arg_max():
+    try:
+        result = subprocess.run(['getconf', 'ARG_MAX'], capture_output=True, text=True, check=True)
+        arg_max = int(result.stdout.strip())
+        return arg_max
+    except (subprocess.SubprocessError, ValueError, FileNotFoundError) as e:
+        print(f"Error getting ARG_MAX: {e}")
+        return 131072  # Common value on many systems (128KB)
+
+
+print(f'Total size of files to send in MB: {(total_size / (1024 * 1024))}')
+
+#process up to ARGMAX or CHUNK_SIZE (500MB) practically we will hit ARGMAX first limiting file sizes < 10MB poission of code or whatever
+arg_max = get_arg_max()
+for file, file_size_mb in tqdm.tqdm(all_files, 'Building and sending batches'):
+    if not file:
+        continue
+
+    new_batch_size = batch_size + file_size_mb
+    if new_batch_size > CHUNK_SIZE or len(str(batch_files)) > arg_max - 100: # length is relative to ARGMAX bash value?
+        last_pushed = process_batch(batch_files, batch_size, batch_count, last_pushed)
+        batch_files = []
+        batch_size = 0
+        batch_count += 1
+    
+    # Add file to current batch
+    batch_files.append(file)
+    batch_size += file_size_mb
+
+# Process any remaining files
+if batch_files:
+    process_batch(batch_files, batch_size, batch_count, last_pushed)
+
+print("Push completed successfully")
