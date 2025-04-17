@@ -1,0 +1,9 @@
+concrete-ml/use_case_examples/cifar/cifar_brevitas_finetuning/checkpoints/CIFAR_10/fp32/CIFAR_10_fp32_state_dict.pt
+concrete-ml/use_case_examples/cifar/cifar_brevitas_finetuning/checkpoints/CIFAR_10/quant/CIFAR_10_quant_state_dict.pt
+concrete-ml/use_case_examples/cifar/cifar_brevitas_finetuning/checkpoints/CIFAR_100/fp32/CIFAR_100_fp32_state_dict.pt
+concrete-ml/use_case_examples/cifar/cifar_brevitas_finetuning/checkpoints/CIFAR_100/quant/CIFAR_100_quant_state_dict.pt
+concrete-ml/use_case_examples/cifar/cifar_brevitas_training/experiments/CNV_2W2A_2W2A_20221114_131345/checkpoints/best.tar
+concrete-ml/use_case_examples/cifar/cifar_brevitas_training/experiments/CNV_2W2A_2W2A_20221114_131345/checkpoints/checkpoint.tar
+karateclub/dataset/node_level/deezer/features.csv
+karateclub/dataset/node_level/lastfm/features.csv
+karateclub/dataset/node_level/wikipedia/features.csv
