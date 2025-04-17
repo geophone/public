@@ -26,7 +26,10 @@ def run_cmd_quiet(cmd):
 
 current_head = run_cmd("git rev-parse HEAD")
 
-current_base = run_cmd('git rev-parse origin/main')
+try:
+    current_base = run_cmd('git rev-parse origin/main') # if no remote assume empty
+except subprocess.CalledProcessError:
+    current_base = 0000000000000000000000000000000000000000 
 
 try:
     commits = run_cmd(f"git rev-list --reverse {current_base}..{current_head}").split("\n")
@@ -100,8 +103,7 @@ for file in tqdm.tqdm(all_files, desc='Adding large files to gitignore'):
 print("All large files added to git ignore")
 all_files = small_files
 
-batch_files = []
-batch_size = 0
+batch_filzes = []
 
 def get_arg_max():
     try:
@@ -116,24 +118,30 @@ def get_arg_max():
 print(f'Total size of files to send in MB: {(total_size / (1024 * 1024))}')
 
 #process up to ARGMAX or CHUNK_SIZE (500MB) practically we will hit ARGMAX first limiting file sizes < 10MB poission of code or whatever
-arg_max = get_arg_max()
-for file, file_size_mb in tqdm.tqdm(all_files, 'Building and sending batches'):
-    if not file:
-        continue
 
-    new_batch_size = batch_size + file_size_mb
-    if new_batch_size > CHUNK_SIZE or len(str(batch_files)) > arg_max - 100: # length is relative to ARGMAX bash value?
-        last_pushed = process_batch(batch_files, batch_size, batch_count, last_pushed)
-        batch_files = []
-        batch_size = 0
-        batch_count += 1
-    
-    # Add file to current batch
-    batch_files.append(file)
-    batch_size += file_size_mb
+def process_files(all_files):
+    batch_files = []
+    batch_size = 0
+    arg_max = get_arg_max()
 
-# Process any remaining files
+    for file, file_size_mb in tqdm.tqdm(all_files, 'Building and sending batches'):
+        if not file:
+            continue
+
+        new_batch_size = batch_size + file_size_mb
+        if new_batch_size > CHUNK_SIZE or len(str(batch_files) + file) > arg_max - 3 * len(batch_files) + 100: # length is relative to ARGMAX bash value? add padding characters and 100
+            last_pushed = process_batch(batch_files, batch_size, batch_count, last_pushed)
+            batch_files = []
+            batch_size = 0
+            batch_count += 1
+        
+        # Add file to current batch
+        batch_files.append(file)
+        batch_size += file_size_mb
+
+process_files(all_files)
+
 if batch_files:
-    process_batch(batch_files, batch_size, batch_count, last_pushed)
+    process_files(batch_files)
 
 print("Push completed successfully")
